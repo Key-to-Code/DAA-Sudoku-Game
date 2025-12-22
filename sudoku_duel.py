@@ -107,23 +107,41 @@ class SudokuDuel:
         
         return board
     
-    def solve_complete(self, board):
-        """Fill board with valid solution using backtracking"""
-        empty = self.find_empty(board)
-        if not empty:
-            return True
-        
-        row, col = empty
-        nums = list(range(1, 10))
-        random.shuffle(nums)
-        
-        for num in nums:
-            if self.is_valid(board, row, col, num):
-                board[row][col] = num
-                if self.solve_complete(board):
-                    return True
-                board[row][col] = 0
-        return False
+    def solve_greedy(self, board):
+        """
+        Fill board using a greedy heuristic (no backtracking).
+        Chooses the empty cell with the fewest valid options and fills it.
+        """
+        """At each step, fill the empty cell that has the fewest valid choices (MRV heuristic), and pick one valid number immediately."""
+
+        while True:
+            best_cell = None
+            best_candidates = None
+
+            # Find the empty cell with minimum remaining values (MRV)
+            for row in range(9):
+                for col in range(9):
+                    if board[row][col] == 0:
+                        candidates = [
+                            num for num in range(1, 10)
+                            if self.is_valid(board, row, col, num)
+                        ]
+
+                        if not candidates:
+                            return False  # Greedy choice failed
+
+                        if best_cell is None or len(candidates) < len(best_candidates):
+                            best_cell = (row, col)
+                            best_candidates = candidates
+
+            # No empty cells left → solved
+            if best_cell is None:
+                return True
+
+            row, col = best_cell
+
+            # Greedy choice: pick the first (or random) valid number
+            board[row][col] = best_candidates[0]
     
     def find_empty(self, board):
         for i in range(9):
