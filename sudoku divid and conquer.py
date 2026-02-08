@@ -10,6 +10,7 @@ class SudokuDuel:
         self.root.title("Sudoku Duel — User vs D&C AI")
         self.root.geometry("600x750")
         self.root.configure(bg="#ffffff")
+        self.root.resizable(False, False)
         
         # Game state
         self.board = [[0]*9 for _ in range(9)]
@@ -18,16 +19,44 @@ class SudokuDuel:
         self.current_turn = "user"
         self.cells = [[None]*9 for _ in range(9)]
         self.pq = []
+        self.difficulty = "Medium"
+        self.difficulty_var = tk.StringVar(value=self.difficulty)
+
         
         # Create GUI
         self.create_widgets()
         self.new_game()
-    
+
+    def on_difficulty_change(self):
+        self.difficulty = self.difficulty_var.get()
+        self.new_game()
+
+
     def create_widgets(self):
         self.status_label = tk.Label(self.root, text="User's Turn", 
                                      font=("Helvetica", 14, "bold"),
                                      bg="#ffffff", fg="black")
         self.status_label.pack(pady=10)
+
+        difficulty_frame = tk.Frame(self.root, bg="#ffffff")
+        difficulty_frame.pack(pady=5)
+
+        tk.Label(
+            difficulty_frame,
+            text="Difficulty:",
+            font=("Helvetica", 12),
+            bg="#ffffff"
+        ).pack(side=tk.LEFT, padx=5)
+
+        for level in ("Easy", "Medium", "Hard"):
+            tk.Radiobutton(
+                difficulty_frame,
+                text=level,
+                value=level,
+                variable=self.difficulty_var,
+                bg="#ffffff",
+                command=self.on_difficulty_change
+            ).pack(side=tk.LEFT, padx=5)
         
         board_frame = tk.Frame(self.root, bg="#d0d0d0", bd=4, relief=tk.SUNKEN)
         board_frame.pack(pady=10)
@@ -63,7 +92,10 @@ class SudokuDuel:
         tk.Button(button_frame, text="Reset", command=self.reset_board,
                   font=("Helvetica", 12), bg="#FF9800", fg="white").grid(row=0, column=3, padx=5)
 
-    def generate_puzzle(self):
+    def generate_puzzle(self,difficulty=None):
+        if difficulty is None:
+            difficulty = self.difficulty
+
         full_board = self.shuffle_board(self.get_base_pattern())
         self.solution_board = copy.deepcopy(full_board)
         self.board = copy.deepcopy(full_board)
@@ -71,8 +103,17 @@ class SudokuDuel:
         cells = [(i, j) for i in range(9) for j in range(9)]
         random.shuffle(cells)
         
+        if difficulty == "Easy":
+            remove_count = random.randint(35, 40)
+        elif difficulty == "Medium":
+            remove_count = random.randint(45, 50)
+        elif difficulty == "Hard":
+            remove_count = random.randint(55, 60)
+        else:
+            remove_count = random.randint(45, 50)
+
         # Remove numbers to create the puzzle (Easy-Medium difficulty)
-        for i in range(random.randint(40, 45)):
+        for i in range(remove_count):
             r, c = cells[i]
             self.board[r][c] = 0
         return self.board
@@ -155,8 +196,6 @@ class SudokuDuel:
             board_snapshot[row][col] = 0 # Backtrack
             
         return None
-
-    # -------------------------------------------------------------------------
 
     def initialize_priority_queue(self):
         self.pq = []
@@ -258,9 +297,8 @@ class SudokuDuel:
             cell.delete(0, tk.END)
 
     def ai_play_button(self):
-        # Routes the manual button click through the proper turn logic
         self.status_label.config(text="AI is Thinking...")
-        self.root.update() # Force UI update so "Thinking" appears
+        self.root.update() 
         self.ai_turn()
 
     def ai_turn(self):
@@ -270,7 +308,8 @@ class SudokuDuel:
             if self.is_complete():
                 messagebox.showinfo("Game Over", "Puzzle Complete!")
             else:
-                messagebox.showinfo("Game Over", "AI cannot find a solution (Unsolvable state).")
+                messagebox.showinfo("Game Over", "AI cannot find a solution (Unsolvable state).")   
+                self.new_game()
             return
             
         # Check for win immediately after AI move
@@ -290,7 +329,7 @@ class SudokuDuel:
         self.current_turn = "user"
         self.initialize_priority_queue()
         self.render_board()
-        self.status_label.config(text="User's Turn")
+        self.status_label.config(text=f"User's Turn {self.difficulty}")
 
     def render_board(self):
         for i in range(9):
@@ -309,23 +348,33 @@ class SudokuDuel:
 
     def show_hint(self):
         self.initialize_priority_queue()
-        # Clean PQ
+
         while self.pq and self.board[self.pq[0][1]][self.pq[0][2]] != 0:
             heapq.heappop(self.pq)
-            
+
         if not self.pq:
             messagebox.showinfo("Hint", "No empty cells remaining!")
             return
-            
+
         _, row, col = self.pq[0]
-        
+
         for i in range(9):
             for j in range(9):
-                self.cells[i][j].config(bg="white")
-        self.cells[row][col].config(bg="#ffeb3b")
-        
+                cell = self.cells[i][j]
+                prev_state = cell.cget("state")
+                cell.config(state="normal", bg="white")
+                cell.config(state=prev_state)
+
+        hint_cell = self.cells[row][col]
+        prev_state = hint_cell.cget("state")
+        hint_cell.config(state="normal", bg="#ffeb3b")
+        hint_cell.config(state=prev_state)
+
         cand = sorted(self.get_candidates(self.board, row, col))
-        messagebox.showinfo("Hint", f"Divide & Conquer Target:\nRow {row+1}, Col {col+1}\nValid Options: {cand}")
+
+        messagebox.showinfo("Hint",f"Divide & Conquer Target:\n"f"Row {row + 1}, Col {col + 1}\n"f"Valid Options: {cand}")
+
+
 
     def reset_board(self):
         self.board = copy.deepcopy(self.initial_board)
