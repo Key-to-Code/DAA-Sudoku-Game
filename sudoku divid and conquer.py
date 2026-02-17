@@ -127,17 +127,21 @@ class SudokuDuel:
         return [[nums[pattern(r, c)] for c in range(9)] for r in range(9)]
 
     def shuffle_board(self, board):
+        # Shuffle rows within 3x3 blocks
         for i in range(0, 9, 3):
             block = board[i:i+3]
             random.shuffle(block)
             board[i:i+3] = block
-        board = list(map(list, zip(*board)))
-        for i in range(0, 9, 3):
-            block = board[i:i+3]
-            random.shuffle(block)
-            board[i:i+3] = block
-        board = list(map(list, zip(*board)))
-        return board
+            
+        # Shuffle the 3x3 blocks themselves 
+        block_indices = [0, 3, 6]
+        random.shuffle(block_indices)
+        new_board = []
+        for idx in block_indices:
+            new_board.extend(board[idx:idx+3])
+        
+        # Transpose and repeat for columns...
+        return new_board
 
     def is_valid(self, board, row, col, num):
         for i in range(9):

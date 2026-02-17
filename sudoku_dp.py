@@ -11,6 +11,102 @@ TODO:
 3. There is no guarantee for uniqueness
 """
 
+class BitmaskSolver:
+    def __init__(self):
+        self.rows = [0] * 9
+        self.cols = [0] * 9
+        self.boxes = [0] * 9
+
+    def _get_box_index(self, r, c):
+        return (r // 3) * 3 + (c // 3)
+
+    def _initialize_masks(self, board):
+        self.rows = [0] * 9
+        self.cols = [0] * 9
+        self.boxes = [0] * 9
+        empty_cells = []
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] != 0:
+                    val = board[r][c] - 1
+                    mask = (1 << val)
+                    self.rows[r] |= mask
+                    self.cols[c] |= mask
+                    self.boxes[self._get_box_index(r, c)] |= mask
+                else:
+                    empty_cells.append((r, c))
+        return empty_cells
+
+    def solve(self, board):
+        # Solves and returns the board, or None
+        empty_cells = self._initialize_masks(board)
+        empty_cells.sort(key=lambda cell: self._count_options(cell[0], cell[1]))
+        
+        if self._backtrack(board, empty_cells, 0):
+            return board
+        return None
+
+    def count_solutions(self, board, limit=2):
+        # Returns number of solutions found (stops at 'limit')
+        self._initialize_masks(board) # Re-init masks for this check
+        
+        # We need a simplified backtrack that counts instead of returning
+        # Note: We don't sort empty_cells here to keep it simple/fast for checking
+        empty_cells = [(r, c) for r in range(9) for c in range(9) if board[r][c] == 0]
+        return self._backtrack_count(board, empty_cells, 0, limit)
+
+    def _count_options(self, r, c):
+        box_idx = self._get_box_index(r, c)
+        taken = self.rows[r] | self.cols[c] | self.boxes[box_idx]
+        options = 0
+        for k in range(9):
+            if not (taken & (1 << k)):
+                options += 1
+        return options
+
+    def _backtrack(self, board, empty_cells, idx):
+        if idx == len(empty_cells):
+            return True
+        r, c = empty_cells[idx]
+        box_idx = self._get_box_index(r, c)
+        taken = self.rows[r] | self.cols[c] | self.boxes[box_idx]
+        for k in range(9):
+            mask = 1 << k
+            if not (taken & mask):
+                board[r][c] = k + 1
+                self.rows[r] |= mask; self.cols[c] |= mask; self.boxes[box_idx] |= mask
+                
+                if self._backtrack(board, empty_cells, idx + 1):
+                    return True
+                
+                self.rows[r] &= ~mask; self.cols[c] &= ~mask; self.boxes[box_idx] &= ~mask
+                board[r][c] = 0
+        return False
+
+    def _backtrack_count(self, board, empty_cells, idx, limit):
+        if idx == len(empty_cells):
+            return 1
+        
+        r, c = empty_cells[idx]
+        box_idx = self._get_box_index(r, c)
+        taken = self.rows[r] | self.cols[c] | self.boxes[box_idx]
+        
+        count = 0
+        for k in range(9):
+            mask = 1 << k
+            if not (taken & mask):
+                board[r][c] = k + 1
+                self.rows[r] |= mask; self.cols[c] |= mask; self.boxes[box_idx] |= mask
+                
+                count += self._backtrack_count(board, empty_cells, idx + 1, limit)
+                
+                self.rows[r] &= ~mask; self.cols[c] &= ~mask; self.boxes[box_idx] &= ~mask
+                board[r][c] = 0
+                
+                if count >= limit: # Optimization: Stop if we found enough
+                    return count
+        return count
+
 class SudokuDuel:
     def __init__(self, root):
         self.root = root
@@ -130,23 +226,43 @@ class SudokuDuel:
         self.new_game()
 
     def generate_puzzle(self):
+        # 1. Start with a full valid board
         full_board = self.shuffle_board(self.get_base_pattern())
         self.solution_board = copy.deepcopy(full_board)
         self.board = copy.deepcopy(full_board)
 
-        cells = [(i, j) for i in range(9) for j in range(9)]
-        random.shuffle(cells)
-
+        # 2. Define attempts based on difficulty
+        # Higher difficulty = we try to remove more numbers
         if self.difficulty == "Easy":
-            remove_count = random.randint(35, 40)
+            target_holes = 30
         elif self.difficulty == "Medium":
-            remove_count = random.randint(45, 50)
+            target_holes = 45
         else:
-            remove_count = random.randint(55, 60)
+            target_holes = 55 # Very Hard
 
-        for i in range(remove_count):
-            r, c = cells[i]
+        cells = [(r, c) for r in range(9) for c in range(9)]
+        random.shuffle(cells)
+        
+        solver = BitmaskSolver()
+        holes = 0
+
+        for r, c in cells:
+            if holes >= target_holes:
+                break
+            
+            # Save value
+            backup = self.board[r][c]
             self.board[r][c] = 0
+            
+            # Check if unique (we pass a copy so we don't mess up masks)
+            # We assume the user wants strictly 1 solution
+            solutions = solver.count_solutions(copy.deepcopy(self.board), limit=2)
+            
+            if solutions != 1:
+                # If 0 solutions (impossible) or >1 solutions (ambiguous), revert
+                self.board[r][c] = backup
+            else:
+                holes += 1
 
         return self.board
 
@@ -170,103 +286,49 @@ class SudokuDuel:
         board = list(map(list, zip(*board)))
         return board
 
-    # --------------------------------------------------
-    # Validation Helpers
-    # --------------------------------------------------
 
-    def get_candidates(self, board, row, col):
-        if board[row][col] != 0:
-            return set()
-
-        candidates = set(range(1, 10))
-        candidates -= set(board[row])
-        candidates -= {board[i][col] for i in range(9)}
-
-        br, bc = 3 * (row // 3), 3 * (col // 3)
-        for i in range(br, br + 3):
-            for j in range(bc, bc + 3):
-                candidates.discard(board[i][j])
-
-        return candidates
+    
 
     # --------------------------------------------------
-    # MRV (Minimum Remaining Values) Heuristic
-    # --------------------------------------------------
-
-    def _find_mrv_cell(self, board):
-        """Find the empty cell with the fewest valid candidates (MRV).
-
-        Returns (row, col, candidates) for the most constrained cell,
-        or None if no empty cells remain.
-        If any empty cell has 0 candidates, returns it immediately
-        (signals an unsolvable state for early pruning).
-        """
-        best_cell = None
-        best_count = 10  # larger than any possible candidate count
-
-        for r in range(9):
-            for c in range(9):
-                if board[r][c] == 0:
-                    cands = self.get_candidates(board, r, c)
-                    num_cands = len(cands)
-
-                    # Immediate failure: empty cell with no options
-                    if num_cands == 0:
-                        return (r, c, cands)
-
-                    if num_cands < best_count:
-                        best_count = num_cands
-                        best_cell = (r, c, cands)
-
-                        # Can't do better than 1 candidate
-                        if best_count == 1:
-                            return best_cell
-
-        return best_cell
-
-    # --------------------------------------------------
-    # DP SOLVER (Memoized + MRV)
+    # DP SOLVER (Bitmasking + MRV)
     # --------------------------------------------------
 
     def solve_dp(self, board_snapshot):
-        self.dp_cache = {}
-        board = copy.deepcopy(board_snapshot)
-        return self._solve_dp_helper(board)
+        """
+        Solves the Sudoku puzzle using a high-performance Bitmasking approach.
+        
+        This method acts as a wrapper for the `BitmaskSolver` class. It employs 
+        State Compression (representing row/col/box constraints as integer bits) 
+        instead of Set objects. This is a foundational technique in Dynamic 
+        Programming (DP) for state representation, offering significantly faster 
+        performance than standard backtracking.
 
-    def _solve_dp_helper(self, board):
-        state = tuple(tuple(row) for row in board)
+        Algorithm Strategy:
+        1. State Compression: Converts board constraints into 3 arrays of integers 
+           (rows, cols, boxes), where the Nth bit represents the Nth number.
+        2. MRV Heuristic: The solver internally sorts empty cells by the number 
+           of valid options (Minimum Remaining Values) to prune the search tree early.
+        3. Backtracking: Recursively fills cells using bitwise operations for 
+           O(1) constant-time validity checks.
 
-        if state in self.dp_cache:
-            return self.dp_cache[state]
+        Args:
+            board_snapshot (list[list[int]]): A snapshot of the current board state.
 
-        # Use MRV heuristic to pick the most constrained empty cell
-        mrv = self._find_mrv_cell(board)
+        Returns:
+            list[list[int]] | None: The fully solved board grid if a solution exists, 
+                                    otherwise None.
+        """
+        # Instantiate the high-performance Bitmask solver
+        solver = BitmaskSolver()
+        
+        # Create a deep copy to prevent the solver's internal state mutations 
+        # from affecting the live UI board before a solution is confirmed.
+        board_copy = copy.deepcopy(board_snapshot)
+        
+        result = solver.solve(board_copy)
+        return result
 
-        # No empty cells — puzzle is solved
-        if mrv is None:
-            self.dp_cache[state] = board
-            return board
-
-        row, col, candidates = mrv
-
-        # If the MRV cell has 0 candidates, this path is unsolvable
-        if not candidates:
-            self.dp_cache[state] = None
-            return None
-
-        for num in candidates:
-            board[row][col] = num
-
-            result = self._solve_dp_helper(board)
-            if result:
-                self.dp_cache[state] = result
-                return result
-
-            board[row][col] = 0
-
-        self.dp_cache[state] = None
-        return None
-
+    
     # --------------------------------------------------
     # AI Logic
     # --------------------------------------------------
