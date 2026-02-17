@@ -4,12 +4,100 @@ import heapq
 import random
 import copy
 
-"""
+class BitmaskSolver:
+    def __init__(self):
+        self.rows = [0] * 9
+        self.cols = [0] * 9
+        self.boxes = [0] * 9
 
-TODO:
-2. Implement the solution where the AI finds incremental solution rather than filling empty cells from comparing the solution
-3. There is no guarantee for uniqueness
-"""
+    def _get_box_index(self, r, c):
+        return (r // 3) * 3 + (c // 3)
+
+    def _initialize_masks(self, board):
+        self.rows = [0] * 9
+        self.cols = [0] * 9
+        self.boxes = [0] * 9
+        empty_cells = []
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] != 0:
+                    val = board[r][c] - 1
+                    mask = (1 << val)
+                    self.rows[r] |= mask
+                    self.cols[c] |= mask
+                    self.boxes[self._get_box_index(r, c)] |= mask
+                else:
+                    empty_cells.append((r, c))
+        return empty_cells
+
+    def solve(self, board):
+        # Solves and returns the board, or None
+        empty_cells = self._initialize_masks(board)
+        empty_cells.sort(key=lambda cell: self._count_options(cell[0], cell[1]))
+        
+        if self._backtrack(board, empty_cells, 0):
+            return board
+        return None
+
+    def count_solutions(self, board, limit=2):
+        # Returns number of solutions found (stops at 'limit')
+        self._initialize_masks(board) # Re-init masks for this check
+        
+        # Note: We don't sort empty_cells here to keep it simple/fast for checking
+        empty_cells = [(r, c) for r in range(9) for c in range(9) if board[r][c] == 0]
+        return self._backtrack_count(board, empty_cells, 0, limit)
+
+    def _count_options(self, r, c):
+        box_idx = self._get_box_index(r, c)
+        taken = self.rows[r] | self.cols[c] | self.boxes[box_idx]
+        options = 0
+        for k in range(9):
+            if not (taken & (1 << k)):
+                options += 1
+        return options
+
+    def _backtrack(self, board, empty_cells, idx):
+        if idx == len(empty_cells):
+            return True
+        r, c = empty_cells[idx]
+        box_idx = self._get_box_index(r, c)
+        taken = self.rows[r] | self.cols[c] | self.boxes[box_idx]
+        for k in range(9):
+            mask = 1 << k
+            if not (taken & mask):
+                board[r][c] = k + 1
+                self.rows[r] |= mask; self.cols[c] |= mask; self.boxes[box_idx] |= mask
+                
+                if self._backtrack(board, empty_cells, idx + 1):
+                    return True
+                
+                self.rows[r] &= ~mask; self.cols[c] &= ~mask; self.boxes[box_idx] &= ~mask
+                board[r][c] = 0
+        return False
+
+    def _backtrack_count(self, board, empty_cells, idx, limit):
+        if idx == len(empty_cells):
+            return 1
+        
+        r, c = empty_cells[idx]
+        box_idx = self._get_box_index(r, c)
+        taken = self.rows[r] | self.cols[c] | self.boxes[box_idx]
+        
+        count = 0
+        for k in range(9):
+            mask = 1 << k
+            if not (taken & mask):
+                board[r][c] = k + 1
+                self.rows[r] |= mask; self.cols[c] |= mask; self.boxes[box_idx] |= mask
+                
+                count += self._backtrack_count(board, empty_cells, idx + 1, limit)
+                
+                self.rows[r] &= ~mask; self.cols[c] &= ~mask; self.boxes[box_idx] &= ~mask
+                board[r][c] = 0
+                
+                if count >= limit: # Optimization: Stop if we found enough
+                    return count
+        return count
 
 class BitmaskSolver:
     def __init__(self):
@@ -337,24 +425,55 @@ class SudokuDuel:
         if self.game_over:
             return
 
-        solved = self.solve_dp(self.board)
-
-        if not solved:
-            messagebox.showinfo("Game Over", "No solution exists.")
-            return
-
-        # Fill one cell only
+        # 1. Analyze the board incrementally for logical deductions
+        solver = BitmaskSolver()
+        solver._initialize_masks(self.board)
+        
+        best_cell = None
+        min_options = 10
+        best_val = None
+        
+        # Scan for the most constrained cell (Minimum Remaining Values heuristic)
         for r in range(9):
             for c in range(9):
                 if self.board[r][c] == 0:
-                    self.board[r][c] = solved[r][c]
-                    self.cells[r][c].delete(0, tk.END)
-                    self.cells[r][c].insert(0, str(solved[r][c]))
-                    self.cells[r][c].config(fg="red")
+                    options_count = solver._count_options(r, c)
+                    if options_count < min_options:
+                        min_options = options_count
+                        best_cell = (r, c)
+                        
+        if not best_cell:
+            return # Board is full
+            
+        r, c = best_cell
+        
+        # 2. Determine the AI's play based on its deductions
+        if min_options == 0:
+            messagebox.showinfo("Game Over", "No solution exists from this state. A wrong move was played!")
+            return
+            
+        elif min_options == 1:
+            # TRUE INCREMENTAL SOLVE: The AI plays a Naked Single 
+            box_idx = solver._get_box_index(r, c)
+            taken = solver.rows[r] | solver.cols[c] | solver.boxes[box_idx]
+            for k in range(9):
+                if not (taken & (1 << k)):
+                    best_val = k + 1
                     break
-            else:
-                continue
-            break
+        else:
+            # FALLBACK: If there are no obvious 1-option deductions, pick the cell with 
+            # the fewest options and use DP to ensure we stay on a valid solve path.
+            solved = self.solve_dp(self.board)
+            if not solved:
+                messagebox.showinfo("Game Over", "No solution exists from this state.")
+                return
+            best_val = solved[r][c]
+
+        # 3. Apply the Move
+        self.board[r][c] = best_val
+        self.cells[r][c].delete(0, tk.END)
+        self.cells[r][c].insert(0, str(best_val))
+        self.cells[r][c].config(fg="red")
 
         if self.is_complete():
             self.game_over = True
@@ -400,24 +519,20 @@ class SudokuDuel:
 
     def is_complete(self):
         """Check if the board is fully filled AND is a valid Sudoku solution."""
-        # Check all cells are filled
         for i in range(9):
             for j in range(9):
                 if self.board[i][j] == 0:
                     return False
 
-        # Validate rows
         for i in range(9):
             if len(set(self.board[i])) != 9:
                 return False
 
-        # Validate columns
         for j in range(9):
             col = {self.board[i][j] for i in range(9)}
             if len(col) != 9:
                 return False
 
-        # Validate 3x3 boxes
         for br in range(0, 9, 3):
             for bc in range(0, 9, 3):
                 box = set()
